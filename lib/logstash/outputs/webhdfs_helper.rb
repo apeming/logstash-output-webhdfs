@@ -1,4 +1,5 @@
 require "logstash/namespace"
+require "redis"
 
 module LogStash
   module Outputs
@@ -85,7 +86,17 @@ module LogStash
       def get_snappy_header!
         [MAGIC, DEFAULT_VERSION, MINIMUM_COMPATIBLE_VERSION].pack("a8NN")
       end
+     
+      def write_to_redis(k, v, host, port)
+        redis = Redis.new(:host => host, :port => port)
+	redis.set(k, v)
+      end
 
+      def get_from_redis(k, host, port)
+        redis = Redis.new(:host => host, :port => port)
+	v = redis.get(k)
+        return v
+      end
     end
   end
 end

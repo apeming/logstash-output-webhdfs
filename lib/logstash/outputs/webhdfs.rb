@@ -52,9 +52,12 @@ class LogStash::Outputs::WebHdfs < LogStash::Outputs::Base
   DEFAULT_VERSION = 1
   MINIMUM_COMPATIBLE_VERSION = 1
 
+  config :redis_host, :validate => :string, :required => true
+  config :redis_port, :validate => :number, :default => 6379
+  config :per_file_size, :validate => :number, :default => 133169152
+  config :prefix, :validate => :string, :required => true
   # The server name for webhdfs/httpfs connections.
   config :host, :validate => :string, :required => true
-
   # The server port for webhdfs/httpfs connections.
   config :port, :validate => :number, :default => 50070
 
@@ -111,11 +114,12 @@ class LogStash::Outputs::WebHdfs < LogStash::Outputs::Base
   # Set snappy format. One of "stream", "file". Set to stream to be hive compatible.
   config :snappy_format, :validate => ["stream", "file"], :default => "stream"
 
+  config :test, :validate => :number, :default => 1
   ## Set codec.
   default :codec, 'line'
 
   public
-
+  
   def register
     load_module('webhdfs')
     if @compression == "gzip"
@@ -171,6 +175,7 @@ class LogStash::Outputs::WebHdfs < LogStash::Outputs::Base
     newline = "\n"
     output_files = Hash.new { |hash, key| hash[key] = "" }
     events.collect do |event|
+      # @logger.error(event)
       # Add thread_id to event metadata to be used as format value in path configuration.
       if @single_file_per_thread
         event.set("[@metadata][thread_id]", Thread.current.object_id.to_s)
@@ -182,7 +187,6 @@ class LogStash::Outputs::WebHdfs < LogStash::Outputs::Base
     end
     output_files.each do |path, output|
       if @compression == "gzip"
-        path += ".gz"
         output = compress_gzip(output)
       elsif @compression == "snappy"
         path += ".snappy"
@@ -200,16 +204,26 @@ class LogStash::Outputs::WebHdfs < LogStash::Outputs::Base
     # Retry max_retry times. This can solve problems like leases being hold by another process. Sadly this is no
     # KNOWN_ERROR in rubys webhdfs client.
     write_tries = 0
+    if not get_from_redis(@prefix, @redis_host, @redis_port)
+     write_to_redis(@prefix, "init", @redis_host, @redis_port)
+    end
+    file_name = @prefix + '.' + get_from_redis(@prefix, @redis_host, @redis_port) + ".gzip"
+    file_path = path + '/' + file_name
     begin
       # Try to append to already existing file, which will work most of the times.
-      @client.append(path, data)
+      @client.append(file_path, data)
+      file_length = @client.stat(file_path)["length"]
+      if file_length > @per_file_size 
+        randam_str = ('a'..'z').to_a.shuffle[0..7].join
+        write_to_redis(@prefix, randam_str, @redis_host, @redis_port)
+      end
       # File does not exist, so create it.
     rescue WebHDFS::FileNotFoundError
       # Add snappy header if format is "file".
       if @compression == "snappy" and @snappy_format == "file"
-        @client.create(path, get_snappy_header! + data)
+        @client.create(file_path, get_snappy_header! + data)
       elsif
-        @client.create(path, data)
+        @client.create(file_path, data)
       end
     # Handle other write errors and retry to write max. @retry_times.
     rescue => e
