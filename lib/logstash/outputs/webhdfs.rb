@@ -210,6 +210,7 @@ class LogStash::Outputs::WebHdfs < LogStash::Outputs::Base
 		hour = hour.to_s
 		if hour.length < 2:
 			hour = '0'+ hour
+		end
 		path = path[0, path_length-2] + hour
 
     write_tries = 0
