@@ -203,15 +203,9 @@ class LogStash::Outputs::WebHdfs < LogStash::Outputs::Base
   def write_data(path, data)
     # Retry max_retry times. This can solve problems like leases being hold by another process. Sadly this is no
     # KNOWN_ERROR in rubys webhdfs client.
-    # hour = path.split('/')[-1]
     path_length = path.length
-    hour = path[path_length-2, path_length-1]
-    hour = hour.to_i + 8
-    hour = hour.to_s
-    if hour.length < 2
-      hour = '0'+ hour
-    end
-      path = path[0, path_length-2] + hour
+    hour = Time.now.strftime("%H")
+    path = path[0, path_length-2] + hour
 
     write_tries = 0
     if not get_from_redis(@prefix, @redis_host, @redis_port)
